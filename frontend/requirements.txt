@@ -2,3 +2,5 @@ streamlit
 requests
 python-dotenv
 streamlit-mic-recorder
+pandas
+plotly

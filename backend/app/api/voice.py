@@ -130,6 +130,7 @@ async def voice_chat(
             "transcript": transcript,
             "answer": chat_result.get("answer", ""),
             "sources": chat_result.get("sources", []),
+            "visuals": chat_result.get("visuals"),
             "audio_available": bool(include_audio),
         }
     except Exception as exc:

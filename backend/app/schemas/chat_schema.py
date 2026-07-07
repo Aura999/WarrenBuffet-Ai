@@ -14,3 +14,4 @@ class ChatResponse(BaseModel):
     query: str
     answer: str
     sources: list[Any] = Field(default_factory=list)
+    visuals: Optional[dict[str, Any]] = None

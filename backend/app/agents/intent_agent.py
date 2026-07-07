@@ -32,6 +32,7 @@ def _is_short_casual(text: str) -> bool:
         "hello",
         "hey",
         "hi bro",
+        "hii bro",
         "hello bro",
         "hey bro",
         "thanks",
@@ -64,6 +65,7 @@ def _deterministic_intent(
 
     identity_terms = (
         "who are you",
+        "who are u",
         "what are you",
         "are you chatgpt",
         "are you openai",

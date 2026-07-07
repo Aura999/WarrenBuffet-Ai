@@ -2,12 +2,15 @@ import os
 import site
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 user_site = site.getusersitepackages()
 if user_site and user_site not in sys.path:
     sys.path.append(user_site)
 
 import requests
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -309,6 +312,173 @@ def is_document_related(query: str) -> bool:
     return any(term in normalized for term in terms)
 
 
+def _currency_symbol(currency: str | None) -> str:
+    symbols = {
+        "INR": "₹",
+        "USD": "$",
+        "EUR": "€",
+        "GBP": "£",
+        "JPY": "¥",
+    }
+    return symbols.get((currency or "").upper(), currency or "")
+
+
+def _format_price(value: Any, currency: str | None = None) -> str:
+    if value is None:
+        return "N/A"
+
+    try:
+        symbol = _currency_symbol(currency)
+        return f"{symbol}{float(value):,.2f}" if symbol else f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _format_compact_number(value: Any) -> str:
+    if value is None:
+        return "N/A"
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    abs_number = abs(number)
+
+    if abs_number >= 10_000_000_000_000:
+        return f"{number / 10_000_000_000_000:.2f} Lakh Cr"
+
+    if abs_number >= 10_000_000:
+        return f"{number / 10_000_000:.2f} Cr"
+
+    if abs_number >= 100_000:
+        return f"{number / 100_000:.2f} L"
+
+    if abs_number >= 1_000:
+        return f"{number / 1_000:.2f}K"
+
+    return f"{number:,.0f}"
+
+
+def _format_percent(value: Any) -> str:
+    if value is None:
+        return "N/A"
+
+    try:
+        return f"{float(value):+.2f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def render_market_snapshot_cards(snapshot: dict[str, Any]) -> None:
+    if not snapshot:
+        return
+
+    currency = snapshot.get("currency")
+    current_price = snapshot.get("current_price")
+    day_change_pct = snapshot.get("day_change_pct")
+    day_change = snapshot.get("day_change")
+
+    st.subheader("Market Snapshot")
+
+    company_name = snapshot.get("company_name")
+    ticker = snapshot.get("ticker")
+    exchange = snapshot.get("exchange")
+
+    if company_name or ticker:
+        st.caption(
+            " | ".join(
+                value
+                for value in (company_name, ticker, exchange, "Data source: yfinance")
+                if value
+            )
+        )
+
+    col1, col2, col3 = st.columns(3)
+    col4, col5, col6 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Current Price",
+            _format_price(current_price, currency),
+            delta=_format_percent(day_change_pct) if day_change_pct is not None else None,
+        )
+
+    with col2:
+        st.metric(
+            "Day Change %",
+            _format_percent(day_change_pct),
+            delta=_format_price(day_change, currency) if day_change is not None else None,
+        )
+
+    with col3:
+        st.metric("Market Cap", _format_compact_number(snapshot.get("market_cap")))
+
+    with col4:
+        st.metric("Volume", _format_compact_number(snapshot.get("volume")))
+
+    with col5:
+        st.metric("52W High", _format_price(snapshot.get("fifty_two_week_high"), currency))
+
+    with col6:
+        st.metric("52W Low", _format_price(snapshot.get("fifty_two_week_low"), currency))
+
+
+def render_price_history_chart(price_history: list[dict[str, Any]], ticker: str | None = None) -> None:
+    if not price_history:
+        return
+
+    try:
+        price_df = pd.DataFrame(price_history)
+
+        if price_df.empty or "date" not in price_df.columns or "close" not in price_df.columns:
+            return
+
+        price_df["date"] = pd.to_datetime(price_df["date"], errors="coerce")
+        price_df = price_df.dropna(subset=["date", "close"])
+
+        if price_df.empty:
+            return
+
+        st.subheader("Price History")
+        chart_title = f"{ticker or 'Ticker'} Closing Price - 1Y"
+        hover_columns = [
+            column
+            for column in ("open", "high", "low", "close", "volume")
+            if column in price_df.columns
+        ]
+        fig = px.line(
+            price_df,
+            x="date",
+            y="close",
+            title=chart_title,
+            hover_data=hover_columns,
+        )
+        fig.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Close",
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception:
+        return
+
+
+def render_visuals(visuals: dict[str, Any] | None) -> None:
+    if not visuals:
+        return
+
+    market_snapshot = visuals.get("market_snapshot") or {}
+    price_history = visuals.get("price_history") or []
+    ticker = market_snapshot.get("ticker")
+
+    if market_snapshot:
+        render_market_snapshot_cards(market_snapshot)
+
+    if price_history:
+        render_price_history_chart(price_history, ticker)
+
+
 def render_sources(sources: list[Any], message_index: int) -> None:
     if not sources:
         return
@@ -319,9 +489,26 @@ def render_sources(sources: list[Any], message_index: int) -> None:
                 if source == "yfinance":
                     st.markdown("- Market data: yfinance")
                 elif source.startswith("http"):
-                    st.markdown(f"- [News source]({source})")
+                    domain = urlparse(source).netloc.replace("www.", "")
+                    st.markdown(f"- News: [{domain or 'News source'}]({source})")
                 else:
                     st.markdown(f"- {source}")
+                continue
+
+            if isinstance(source, dict) and source.get("type") == "news":
+                url = source.get("url") or ""
+                title = source.get("title")
+                domain = urlparse(url).netloc.replace("www.", "") if url else ""
+                label = title or domain or "News source"
+
+                if url:
+                    st.markdown(f"- News: [{label}]({url})")
+                else:
+                    st.markdown(f"- News: {label}")
+
+                if domain and title:
+                    st.caption(domain)
+
                 continue
 
             if isinstance(source, dict) and source.get("type") == "document":
@@ -358,10 +545,12 @@ def render_sources(sources: list[Any], message_index: int) -> None:
 def render_chat_history() -> None:
     for index, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
             if message["role"] == "assistant":
+                render_visuals(message.get("visuals"))
+                st.markdown(message["content"])
                 render_sources(message.get("sources", []), index)
+            else:
+                st.markdown(message["content"])
 
 
 def render_sidebar() -> str:
@@ -504,6 +693,8 @@ def render_research_chat(ticker: str) -> None:
         if result.get("success"):
             answer = result.get("answer") or ""
             sources = result.get("sources") or []
+            visuals = result.get("visuals")
+            render_visuals(visuals)
             st.markdown(answer)
             render_sources(sources, len(st.session_state.messages))
             st.session_state.messages.append(
@@ -511,6 +702,7 @@ def render_research_chat(ticker: str) -> None:
                     "role": "assistant",
                     "content": answer,
                     "sources": sources,
+                    "visuals": visuals,
                 }
             )
         else:
@@ -616,7 +808,9 @@ def render_voice_assistant(ticker: str) -> None:
 
         answer = result.get("answer") or ""
         sources = result.get("sources") or []
+        visuals = result.get("visuals")
 
+        render_visuals(visuals)
         st.markdown(answer)
         render_sources(sources, len(st.session_state.messages) + 1000)
 
@@ -632,6 +826,7 @@ def render_voice_assistant(ticker: str) -> None:
                 "role": "assistant",
                 "content": answer,
                 "sources": sources,
+                "visuals": visuals,
             }
         )
 

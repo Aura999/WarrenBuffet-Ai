@@ -180,6 +180,7 @@ def generate_financial_response(
     news_data: dict | None = None,
     sentiment_data: dict | None = None,
     rag_data: dict | None = None,
+    include_market_snapshot_text: bool = True,
 ) -> str:
     validate_settings()
 
@@ -192,7 +193,11 @@ def generate_financial_response(
     document_insights_text = None
 
     if market_data and market_data.get("data_status") == "ok":
-        market_snapshot_text = format_market_snapshot(market_data)
+        market_snapshot_text = (
+            format_market_snapshot(market_data)
+            if include_market_snapshot_text
+            else None
+        )
         market_data_context = f"""
 
 MARKET DATA CONTEXT:
@@ -233,7 +238,10 @@ RECENT COMPANY-SPECIFIC NEWS CONTEXT:
 {_format_news_context(news_data)}
 """
     elif news_data and news_data.get("data_status") == "empty":
-        news_unavailable_text = "Company-specific recent news could not be fetched in this run."
+        news_unavailable_text = """### News & Sentiment Snapshot
+- Company-specific recent news could not be fetched in this run.
+- Data Source: Tavily search attempted
+- Note: Irrelevant/general news results were filtered out."""
         news_context = f"""
 
 RECENT NEWS CONTEXT:
@@ -297,6 +305,17 @@ Error: {rag_data.get("error")}
         if _asks_for_live_data(query) and market_data and market_data.get("data_status") == "ok"
         else ""
     )
+    market_snapshot_response_instruction = (
+        '- Do not create a Market Snapshot section. The UI already displays structured '
+        'Market Snapshot cards. Do not repeat the full market snapshot table/list in '
+        'the answer. Refer to it briefly as "the market snapshot above" and focus on '
+        'interpretation, drivers, risks, bull case, bear case, and what to watch. Do '
+        'not repeat Current Price, Previous Close, Day Change, Open, Day High, Day '
+        'Low, Volume, Market Cap, 52W High, 52W Low, Currency, or Exchange as a '
+        'snapshot list.'
+        if not include_market_snapshot_text
+        else "- Do not create a Market Snapshot section. It has already been generated and will be prepended separately. Start your response after the Market Snapshot."
+    )
 
     user_prompt = f"""
 Route: {route}
@@ -315,7 +334,7 @@ Create a structured financial research-style response. Use this structure where 
 
 Important constraints:
 - Start your response with "### 1. Executive Summary" unless there is a stronger analysis heading needed.
-- Do not create a Market Snapshot section. It has already been generated and will be prepended separately. Start your response after the Market Snapshot.
+{market_snapshot_response_instruction}
 - Do not create a News & Sentiment Snapshot section. It has already been generated and will be prepended separately when relevant. Use the news context in the analysis if relevant.
 - Do not create a Document Insights section. It has already been generated and will be prepended separately when document context exists.
 - If no successful Tavily news context is provided, say "Company-specific recent news could not be fetched in this run." in the analysis where relevant.
@@ -328,6 +347,7 @@ Important constraints:
 - Do not overstate this as real-time data. Mention that yfinance market data may be delayed.
 - Do not invent missing financial metrics.
 - Do not invent current events or news.
+- Do not let unavailable or filtered-out news affect the Executive Summary, Key Drivers, Risks, Bull Case, Bear Case, or What To Watch Next.
 - Do not invent document facts or page numbers.
 - If document context is insufficient, say so clearly.
 - If document context conflicts with generic prior knowledge, prefer document context and say "based on the uploaded document".

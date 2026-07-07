@@ -3,13 +3,14 @@ from app.core.config import TAVILY_API_KEY, validate_tavily_settings
 
 COMPANY_ALIASES = {
     "RELIANCE.NS": [
-        "reliance",
         "reliance industries",
+        "reliance industries ltd",
         "ril",
+        "reliance jio",
+        "jio platforms",
         "jio",
         "jiomart",
         "mukesh ambani",
-        "jamnagar",
         "reliance retail",
     ],
     "ETERNAL.NS": [
@@ -148,7 +149,69 @@ def _normalize_article(result: dict) -> dict:
     }
 
 
-def _article_matches_company(article: dict, keywords: list[str]) -> bool:
+def _article_matches_reliance(article: dict) -> bool:
+    import re
+
+    title = str(article.get("title") or "").lower()
+    url = str(article.get("url") or "").lower()
+    content = str(article.get("content") or "").lower()
+    text = f"{title} {url} {content}"
+    strong_aliases = (
+        "reliance industries",
+        "reliance industries ltd",
+        "ril",
+        "reliance jio",
+        "jio platforms",
+        "jio",
+        "reliance retail",
+        "mukesh ambani",
+    )
+    company_context_terms = (
+        "industries",
+        "ltd",
+        "jio",
+        "retail",
+        "ambani",
+        "oil-to-chemicals",
+        "petrochemicals",
+        "nse",
+        "bse",
+        "ril",
+    )
+    generic_reliance_patterns = (
+        r"\breliance on\b",
+        r"\breduce reliance\b",
+        r"\breducing reliance\b",
+        r"\bless reliance\b",
+        r"\bdependence/reliance\b",
+        r"\breliance/dependence\b",
+        r"\breliance on u\.s\.\b",
+        r"\breliance on us\b",
+        r"\breliance on china\b",
+        r"\breliance on oil\b",
+        r"\breliance on imports\b",
+    )
+
+    if any(alias in text for alias in strong_aliases):
+        return True
+
+    if not re.search(r"\breliance\b", text):
+        return False
+
+    if any(re.search(pattern, text) for pattern in generic_reliance_patterns):
+        return False
+
+    return any(re.search(rf"\b{re.escape(term)}\b", text) for term in company_context_terms)
+
+
+def _article_matches_company(
+    article: dict,
+    keywords: list[str],
+    ticker: str | None = None,
+) -> bool:
+    if ticker and ticker.upper() == "RELIANCE.NS":
+        return _article_matches_reliance(article)
+
     if not keywords:
         return True
 
@@ -196,9 +259,6 @@ def _contains_company_keyword(text: str, keyword: str) -> bool:
     if not normalized_keyword:
         return False
 
-    if normalized_keyword == "reliance":
-        return re.search(r"(?<!self[-\s])\breliance\b", normalized_text) is not None
-
     if normalized_keyword.isalnum():
         return re.search(rf"\b{re.escape(normalized_keyword)}\b", normalized_text) is not None
 
@@ -237,7 +297,7 @@ def get_company_news(
         articles = [
             article
             for article in articles
-            if _article_matches_company(article, company_keywords)
+            if _article_matches_company(article, company_keywords, ticker)
         ][:max_results]
 
         if not articles:

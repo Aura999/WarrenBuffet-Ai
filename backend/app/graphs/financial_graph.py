@@ -19,6 +19,7 @@ class FinancialGraphState(TypedDict, total=False):
     news_data: dict | None
     sentiment_data: dict | None
     rag_data: dict | None
+    include_market_snapshot_text: bool
     answer: str | None
 
 
@@ -197,6 +198,7 @@ def synthesis_node(state: FinancialGraphState) -> FinancialGraphState:
         news_data=state.get("news_data"),
         sentiment_data=state.get("sentiment_data"),
         rag_data=state.get("rag_data"),
+        include_market_snapshot_text=state.get("include_market_snapshot_text", True),
     )
     return {"answer": answer}
 
@@ -226,6 +228,7 @@ def run_financial_graph(
     query: str,
     ticker: str | None = None,
     document_ids: list[str] | None = None,
+    include_market_snapshot_text: bool = True,
 ) -> dict:
     graph = build_financial_graph()
     return graph.invoke(
@@ -233,5 +236,6 @@ def run_financial_graph(
             "query": query,
             "ticker": ticker,
             "document_ids": document_ids,
+            "include_market_snapshot_text": include_market_snapshot_text,
         }
     )

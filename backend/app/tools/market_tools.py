@@ -8,6 +8,12 @@ def _clean_value(value):
     except TypeError:
         pass
 
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (TypeError, ValueError):
+            pass
+
     return value
 
 
@@ -104,3 +110,45 @@ def get_market_snapshot(ticker: str) -> dict:
             "data_status": "error",
             "error": str(exc) or "Market data could not be fetched.",
         }
+
+
+def get_price_history(
+    ticker: str,
+    period: str = "1y",
+    interval: str = "1d",
+) -> list[dict]:
+    if not ticker:
+        return []
+
+    try:
+        import contextlib
+        import io
+
+        import yfinance as yf
+
+        stock = yf.Ticker(ticker)
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            history = stock.history(period=period, interval=interval)
+
+        if history is None or history.empty:
+            return []
+
+        records = []
+
+        for index, row in history.iterrows():
+            date_value = index.date().isoformat() if hasattr(index, "date") else str(index)
+            records.append(
+                {
+                    "date": date_value,
+                    "open": _round_number(row.get("Open")),
+                    "high": _round_number(row.get("High")),
+                    "low": _round_number(row.get("Low")),
+                    "close": _round_number(row.get("Close")),
+                    "volume": _clean_value(row.get("Volume")),
+                }
+            )
+
+        return records
+    except Exception:
+        return []

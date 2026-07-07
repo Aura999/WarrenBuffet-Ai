@@ -69,6 +69,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             query=result["query"],
             answer=result["answer"],
             sources=result["sources"],
+            visuals=result.get("visuals"),
         )
     except ValueError as exc:
         if "OPENAI_API_KEY is missing" in str(exc):
