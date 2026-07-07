@@ -1,3 +1,12 @@
+from typing import Any
+
+from app.core.observability import (
+    logger,
+    summarize_price_history_output,
+    traceable_if_enabled,
+)
+
+
 def _clean_value(value):
     if value is None:
         return None
@@ -29,6 +38,31 @@ def _round_number(value, decimals: int = 2):
         return value
 
 
+def _process_market_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ticker": inputs.get("ticker"),
+        "source": "yfinance",
+    }
+
+
+def _process_market_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    return {
+        "ticker": output.get("ticker"),
+        "data_status": output.get("data_status"),
+        "has_current_price": output.get("current_price") is not None,
+        "error": output.get("error"),
+    }
+
+
+@traceable_if_enabled(
+    name="Market Data Agent",
+    run_type="tool",
+    process_inputs=_process_market_trace_inputs,
+    process_outputs=_process_market_trace_outputs,
+)
 def get_market_snapshot(ticker: str) -> dict:
     try:
         import contextlib
@@ -97,14 +131,17 @@ def get_market_snapshot(ticker: str) -> dict:
         )
 
         if not has_market_value:
+            logger.info("market_data ticker=%s status=error reason=no_usable_fields", ticker)
             return {
                 "ticker": ticker,
                 "data_status": "error",
                 "error": "Market data response did not include usable quote fields.",
             }
 
+        logger.info("market_data ticker=%s status=ok", ticker)
         return snapshot
     except Exception as exc:
+        logger.info("market_data ticker=%s status=error", ticker)
         return {
             "ticker": ticker,
             "data_status": "error",
@@ -112,6 +149,20 @@ def get_market_snapshot(ticker: str) -> dict:
         }
 
 
+def _process_price_history_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ticker": inputs.get("ticker"),
+        "period": inputs.get("period", "1y"),
+        "interval": inputs.get("interval", "1d"),
+    }
+
+
+@traceable_if_enabled(
+    name="Price History Fetch",
+    run_type="tool",
+    process_inputs=_process_price_history_inputs,
+    process_outputs=summarize_price_history_output,
+)
 def get_price_history(
     ticker: str,
     period: str = "1y",
@@ -132,6 +183,12 @@ def get_price_history(
             history = stock.history(period=period, interval=interval)
 
         if history is None or history.empty:
+            logger.info(
+                "price_history ticker=%s period=%s interval=%s rows_returned=0",
+                ticker,
+                period,
+                interval,
+            )
             return []
 
         records = []
@@ -149,6 +206,19 @@ def get_price_history(
                 }
             )
 
+        logger.info(
+            "price_history ticker=%s period=%s interval=%s rows_returned=%s",
+            ticker,
+            period,
+            interval,
+            len(records),
+        )
         return records
     except Exception:
+        logger.info(
+            "price_history ticker=%s period=%s interval=%s rows_returned=0",
+            ticker,
+            period,
+            interval,
+        )
         return []

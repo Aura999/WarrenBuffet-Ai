@@ -4,12 +4,20 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.config import OPENAI_MODEL, validate_settings
+from app.core.observability import summarize_answer_output, traceable_if_enabled
 
 
 BRAND_IDENTITY = (
     "WarrenBuffet.Ai, an AI-powered financial research copilot designed and "
     "built by Satyam Mishra"
 )
+
+
+def _process_conversation_trace_inputs(inputs: dict) -> dict:
+    return {
+        "query": inputs.get("query"),
+        "intent": inputs.get("intent"),
+    }
 
 
 def _fallback_response(intent: str, query: str = "") -> str:
@@ -85,6 +93,20 @@ def _remove_identity_leakage(text: str, intent: str, query: str = "") -> str:
 
 
 def generate_conversational_response(
+    query: str,
+    intent: str,
+    ticker: str | None = None,
+    document_ids: list[str] | None = None,
+) -> str:
+    return _generate_conversational_response_traced(query, intent, ticker, document_ids)
+
+
+@traceable_if_enabled(
+    name="Conversation Agent",
+    process_inputs=_process_conversation_trace_inputs,
+    process_outputs=summarize_answer_output,
+)
+def _generate_conversational_response_traced(
     query: str,
     intent: str,
     ticker: str | None = None,

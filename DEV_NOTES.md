@@ -115,6 +115,54 @@ Expected: document-grounded answer with source metadata. Uploaded documents are 
 
 Expected: transcript appears, then the same intent routing and research pipeline used by text chat runs.
 
+## LangSmith Observability
+
+WarrenBuffet.Ai supports optional LangSmith tracing for backend debugging and observability.
+
+Add this to your local `.env` or root Docker `.env`:
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your_langsmith_key
+LANGSMITH_PROJECT=WarrenBuffet-Ai
+```
+
+What is traced:
+
+- chat requests
+- intent classification
+- conversation agent
+- financial research graph
+- market data fetch
+- price history fetch
+- news retrieval/filtering
+- RAG retrieval
+- synthesis
+- voice transcription/chat
+
+Health check includes tracing status:
+
+```text
+http://127.0.0.1:8000/api/health
+```
+
+Expected shape:
+
+```json
+{
+  "status": "ok",
+  "langsmith_tracing": true
+}
+```
+
+Disable tracing with:
+
+```env
+LANGSMITH_TRACING=false
+```
+
+Do not commit real LangSmith API keys.
+
 ## Common Issues
 
 Docker Desktop not running:

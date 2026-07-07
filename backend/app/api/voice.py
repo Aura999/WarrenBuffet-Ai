@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from app.core.observability import logger, traceable_if_enabled
 from app.services.chat_service import handle_chat_request
 from app.services.voice_service import text_to_speech, transcribe_audio_file
 
@@ -54,6 +55,47 @@ async def _save_upload_to_temp(file: UploadFile) -> str:
         return temp_file.name
 
 
+def _process_voice_transcription_inputs(inputs: dict) -> dict:
+    return {
+        "filename": inputs.get("filename"),
+        "content_type": inputs.get("content_type"),
+    }
+
+
+def _process_voice_transcription_outputs(output: dict) -> dict:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    transcript = str(output.get("transcript") or "")
+    return {
+        "success": output.get("success"),
+        "transcript_length": len(transcript),
+        "has_transcript": bool(transcript.strip()),
+    }
+
+
+@traceable_if_enabled(
+    name="Voice Transcription",
+    process_inputs=_process_voice_transcription_inputs,
+    process_outputs=_process_voice_transcription_outputs,
+)
+def _transcribe_saved_audio(
+    temp_path: str,
+    filename: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    result = transcribe_audio_file(temp_path)
+    transcript = str(result.get("transcript") or "")
+    logger.info(
+        "voice_transcription filename=%s content_type=%s transcript_length=%s success=%s",
+        filename,
+        content_type,
+        len(transcript),
+        result.get("success"),
+    )
+    return result
+
+
 @router.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)) -> dict:
     if not _is_supported_audio(file):
@@ -66,7 +108,11 @@ async def transcribe_audio(file: UploadFile = File(...)) -> dict:
 
     try:
         temp_path = await _save_upload_to_temp(file)
-        return transcribe_audio_file(temp_path)
+        return _transcribe_saved_audio(
+            temp_path=temp_path,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
     finally:
         if temp_path and os.path.exists(temp_path):
             os.unlink(temp_path)
@@ -106,7 +152,11 @@ async def voice_chat(
 
     try:
         temp_path = await _save_upload_to_temp(file)
-        transcription = transcribe_audio_file(temp_path)
+        transcription = _transcribe_saved_audio(
+            temp_path=temp_path,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
 
         if not transcription.get("success"):
             return transcription
@@ -123,6 +173,13 @@ async def voice_chat(
             query=transcript,
             ticker=ticker or None,
             document_ids=_parse_document_ids(document_ids),
+            request_type="voice_chat",
+        )
+        logger.info(
+            "voice_chat transcript_length=%s ticker=%s document_ids_count=%s",
+            len(transcript),
+            ticker,
+            len(_parse_document_ids(document_ids) or []),
         )
 
         return {

@@ -2,6 +2,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.config import OPENAI_MODEL, validate_settings
+from app.core.observability import logger, summarize_answer_output, traceable_if_enabled
 
 
 SYSTEM_PROMPT = """You are WarrenBuffet.Ai, an AI-powered financial research copilot designed and built by Satyam Mishra. You help users understand companies, markets, financial risks, and investment narratives. You provide structured research-style analysis, but you do not provide personalized financial advice or guaranteed buy/sell recommendations. Do not introduce yourself as ChatGPT, OpenAI, GPT, or any underlying model provider. Be clear, concise, and analytical."""
@@ -172,6 +173,25 @@ def _strip_generated_snapshots(text: str) -> str:
     return stripped
 
 
+def _process_synthesis_trace_inputs(inputs: dict) -> dict:
+    market_data = inputs.get("market_data") or {}
+    news_data = inputs.get("news_data") or {}
+    rag_data = inputs.get("rag_data") or {}
+    return {
+        "query": inputs.get("query"),
+        "ticker": inputs.get("ticker"),
+        "route": inputs.get("route"),
+        "has_market_data": market_data.get("data_status") == "ok",
+        "has_news_data": news_data.get("data_status") == "ok",
+        "has_rag_data": rag_data.get("data_status") == "ok",
+    }
+
+
+@traceable_if_enabled(
+    name="Synthesis Agent",
+    process_inputs=_process_synthesis_trace_inputs,
+    process_outputs=summarize_answer_output,
+)
 def generate_financial_response(
     query: str,
     ticker: str | None = None,
@@ -382,10 +402,25 @@ Important constraints:
 
     if snapshots:
         analysis = _strip_generated_snapshots(analysis)
-        return "\n\n".join([*snapshots, analysis])
+        answer = "\n\n".join([*snapshots, analysis])
+        logger.info(
+            "synthesis has_market_data=%s has_news_data=%s has_rag_data=%s answer_length=%s",
+            bool(market_data and market_data.get("data_status") == "ok"),
+            bool(news_data and news_data.get("data_status") == "ok"),
+            bool(rag_data and rag_data.get("data_status") == "ok"),
+            len(answer),
+        )
+        return answer
 
     analysis = _strip_generated_snapshots(analysis)
 
+    logger.info(
+        "synthesis has_market_data=%s has_news_data=%s has_rag_data=%s answer_length=%s",
+        bool(market_data and market_data.get("data_status") == "ok"),
+        bool(news_data and news_data.get("data_status") == "ok"),
+        bool(rag_data and rag_data.get("data_status") == "ok"),
+        len(analysis),
+    )
     return analysis
 
 

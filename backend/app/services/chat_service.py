@@ -2,6 +2,8 @@ from typing import Any
 
 from app.agents.conversation_agent import generate_conversational_response
 from app.agents.intent_agent import classify_intent
+from app.core.config import LANGSMITH_PROJECT
+from app.core.observability import logger, traceable_if_enabled
 from app.graphs.financial_graph import run_financial_graph
 from app.tools.market_tools import get_price_history
 
@@ -13,6 +15,34 @@ CONVERSATIONAL_INTENTS = {
     "clarification_or_planning",
     "voice_meta",
 }
+
+
+def _process_chat_trace_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    document_ids = inputs.get("document_ids") or []
+    return {
+        "query": inputs.get("query"),
+        "ticker": inputs.get("ticker"),
+        "document_ids_count": len(document_ids),
+        "has_documents": bool(document_ids),
+        "request_type": inputs.get("request_type"),
+        "project": LANGSMITH_PROJECT,
+    }
+
+
+def _process_chat_trace_outputs(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    answer = str(output.get("answer") or "")
+    visuals = output.get("visuals") or {}
+    return {
+        "success": output.get("success"),
+        "intent": output.get("intent"),
+        "answer_length": len(answer),
+        "sources_count": len(output.get("sources") or []),
+        "has_market_snapshot": bool(visuals.get("market_snapshot")),
+        "has_price_history": bool(visuals.get("price_history")),
+    }
 
 
 def _extract_sources(final_state: dict) -> list[Any]:
@@ -138,9 +168,38 @@ def handle_chat_request(
     query: str,
     ticker: str | None = None,
     document_ids: list[str] | None = None,
+    request_type: str = "text_chat",
+) -> dict:
+    return _handle_chat_request_traced(
+        query=query,
+        ticker=ticker,
+        document_ids=document_ids,
+        request_type=request_type,
+    )
+
+
+@traceable_if_enabled(
+    name="WarrenBuffetAi Chat Request",
+    metadata={"project": LANGSMITH_PROJECT},
+    process_inputs=_process_chat_trace_inputs,
+    process_outputs=_process_chat_trace_outputs,
+)
+def _handle_chat_request_traced(
+    query: str,
+    ticker: str | None = None,
+    document_ids: list[str] | None = None,
+    request_type: str = "text_chat",
 ) -> dict:
     intent = classify_intent(query, ticker, document_ids)
     resolved_ticker = _infer_ticker_from_query(query, ticker)
+    logger.info(
+        "chat_request intent=%s request_type=%s ticker=%s resolved_ticker=%s document_ids_count=%s",
+        intent,
+        request_type,
+        ticker,
+        resolved_ticker,
+        len(document_ids or []),
+    )
 
     if intent in CONVERSATIONAL_INTENTS:
         answer = generate_conversational_response(
@@ -174,12 +233,19 @@ def handle_chat_request(
         document_ids=document_ids,
         include_market_snapshot_text=False,
     )
+    visuals = _build_visuals(final_state, resolved_ticker)
+    logger.info(
+        "chat_request_completed intent=%s resolved_ticker=%s visuals_generated=%s",
+        intent,
+        resolved_ticker,
+        bool(visuals),
+    )
 
     return {
         "success": True,
         "query": query,
         "answer": final_state["answer"],
         "sources": _extract_sources(final_state),
-        "visuals": _build_visuals(final_state, resolved_ticker),
+        "visuals": visuals,
         "intent": intent,
     }

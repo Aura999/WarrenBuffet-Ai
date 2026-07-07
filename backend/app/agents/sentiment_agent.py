@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.config import OPENAI_MODEL, validate_settings
+from app.core.observability import logger, traceable_if_enabled
 
 
 VALID_SENTIMENTS = {"positive", "negative", "neutral", "mixed", "unknown"}
@@ -38,8 +39,33 @@ def _article_context(articles: list) -> str:
     return "\n\n".join(rows)
 
 
+def _process_sentiment_trace_inputs(inputs: dict) -> dict:
+    articles = inputs.get("articles") or []
+    return {
+        "query": inputs.get("query"),
+        "news_count": len(articles),
+    }
+
+
+def _process_sentiment_trace_outputs(output: dict) -> dict:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    return {
+        "sentiment": output.get("sentiment"),
+        "summary_length": len(str(output.get("summary") or "")),
+        "key_drivers_count": len(output.get("key_drivers") or []),
+    }
+
+
+@traceable_if_enabled(
+    name="Sentiment Agent",
+    process_inputs=_process_sentiment_trace_inputs,
+    process_outputs=_process_sentiment_trace_outputs,
+)
 def analyze_news_sentiment(query: str, articles: list) -> dict:
     if not articles:
+        logger.info("sentiment news_count=0 sentiment=unknown")
         return _unknown_sentiment()
 
     validate_settings()
@@ -79,6 +105,7 @@ Articles:
     try:
         data = json.loads(json_match.group(0) if json_match else content)
     except json.JSONDecodeError:
+        logger.info("sentiment news_count=%s sentiment=unknown parse_error=true", len(articles))
         return {
             "sentiment": "unknown",
             "summary": "News sentiment could not be parsed reliably.",
@@ -93,6 +120,7 @@ Articles:
     if not isinstance(key_drivers, list):
         key_drivers = []
 
+    logger.info("sentiment news_count=%s sentiment=%s", len(articles), sentiment)
     return {
         "sentiment": sentiment,
         "summary": data.get("summary") or "No sentiment summary was available.",

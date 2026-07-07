@@ -1,4 +1,5 @@
 from app.core.config import TAVILY_API_KEY, validate_tavily_settings
+from app.core.observability import logger, traceable_if_enabled
 
 
 COMPANY_ALIASES = {
@@ -265,6 +266,32 @@ def _contains_company_keyword(text: str, keyword: str) -> bool:
     return normalized_keyword in normalized_text
 
 
+def _process_news_trace_inputs(inputs: dict) -> dict:
+    return {
+        "query": inputs.get("query"),
+        "ticker": inputs.get("ticker"),
+        "company_name": inputs.get("company_name"),
+    }
+
+
+def _process_news_trace_outputs(output: dict) -> dict:
+    if not isinstance(output, dict):
+        return {"output_type": type(output).__name__}
+
+    return {
+        "data_status": output.get("data_status"),
+        "query": output.get("query"),
+        "raw_results_count": output.get("raw_results_count"),
+        "filtered_results_count": output.get("filtered_results_count"),
+    }
+
+
+@traceable_if_enabled(
+    name="News Agent",
+    run_type="tool",
+    process_inputs=_process_news_trace_inputs,
+    process_outputs=_process_news_trace_outputs,
+)
 def get_company_news(
     query: str,
     ticker: str | None = None,
@@ -289,22 +316,31 @@ def get_company_news(
             include_raw_content=False,
         )
 
-        articles = [
+        raw_articles = [
             _normalize_article(result)
             for result in response.get("results", [])
             if result.get("title") or result.get("content") or result.get("url")
         ]
+        raw_results_count = len(raw_articles)
         articles = [
             article
-            for article in articles
+            for article in raw_articles
             if _article_matches_company(article, company_keywords, ticker)
         ][:max_results]
+        logger.info(
+            "news_results ticker=%s raw_results_count=%s filtered_results_count=%s",
+            ticker,
+            raw_results_count,
+            len(articles),
+        )
 
         if not articles:
             return {
                 "data_status": "empty",
                 "query": search_query,
                 "articles": [],
+                "raw_results_count": raw_results_count,
+                "filtered_results_count": 0,
                 "message": "No company-specific recent news found.",
             }
 
@@ -312,11 +348,16 @@ def get_company_news(
             "data_status": "ok",
             "query": search_query,
             "articles": articles,
+            "raw_results_count": raw_results_count,
+            "filtered_results_count": len(articles),
         }
     except Exception as exc:
+        logger.info("news_results ticker=%s status=error", ticker)
         return {
             "data_status": "error",
             "query": search_query,
             "error": str(exc) or "News data could not be fetched.",
             "articles": [],
+            "raw_results_count": 0,
+            "filtered_results_count": 0,
         }

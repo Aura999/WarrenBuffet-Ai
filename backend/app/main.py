@@ -3,6 +3,7 @@ from fastapi.openapi.utils import get_openapi
 
 from app.api.documents import router as documents_router
 from app.api.voice import router as voice_router
+from app.core.config import LANGSMITH_ENABLED
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.services.chat_service import handle_chat_request
 
@@ -52,8 +53,11 @@ def read_root() -> dict[str, str]:
 
 
 @app.get("/api/health")
-def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+def health_check() -> dict[str, str | bool]:
+    return {
+        "status": "ok",
+        "langsmith_tracing": LANGSMITH_ENABLED,
+    }
 
 
 @app.post("/api/chat", response_model=ChatResponse)

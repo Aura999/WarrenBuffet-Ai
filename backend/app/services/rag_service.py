@@ -2,6 +2,7 @@ import numpy as np
 from langchain_openai import OpenAIEmbeddings
 
 from app.core.config import OPENAI_EMBEDDING_MODEL, validate_settings
+from app.core.observability import logger, summarize_chunks_output, traceable_if_enabled
 from app.services.document_store import (
     add_document,
     get_document_metadata,
@@ -90,6 +91,21 @@ def index_document(
         }
 
 
+def _process_rag_trace_inputs(inputs: dict) -> dict:
+    document_ids = inputs.get("document_ids") or []
+    return {
+        "query": inputs.get("query"),
+        "document_ids_count": len(document_ids),
+        "k": inputs.get("k"),
+    }
+
+
+@traceable_if_enabled(
+    name="Document RAG Agent",
+    run_type="retriever",
+    process_inputs=_process_rag_trace_inputs,
+    process_outputs=summarize_chunks_output,
+)
 def retrieve_relevant_chunks(
     query: str,
     document_ids: list[str] | None = None,
@@ -99,6 +115,7 @@ def retrieve_relevant_chunks(
         documents = list_documents()
 
         if not documents:
+            logger.info("rag_retrieval document_ids_count=%s retrieved_chunks_count=0", len(document_ids or []))
             return {
                 "success": False,
                 "error": "No documents have been uploaded or indexed.",
@@ -164,18 +181,26 @@ def retrieve_relevant_chunks(
                 if invalid_results
                 else "No relevant document chunks were retrieved."
             )
+            logger.info("rag_retrieval document_ids_count=%s retrieved_chunks_count=0", len(selected_document_ids))
             return {
                 "success": False,
                 "error": error,
                 "chunks": [],
             }
 
+        retrieved = valid_results[:k]
+        logger.info(
+            "rag_retrieval document_ids_count=%s retrieved_chunks_count=%s",
+            len(selected_document_ids),
+            len(retrieved),
+        )
         return {
             "success": True,
             "query": query,
-            "chunks": valid_results[:k],
+            "chunks": retrieved,
         }
     except Exception as exc:
+        logger.info("rag_retrieval document_ids_count=%s retrieved_chunks_count=0 error=true", len(document_ids or []))
         return {
             "success": False,
             "error": str(exc) or "Document retrieval failed.",

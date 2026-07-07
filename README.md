@@ -215,8 +215,40 @@ Open:
 - `TAVILY_API_KEY`: Tavily key used for company-specific news retrieval.
 - `TTS_PROVIDER`: Text-to-speech provider. Current default is `gtts`.
 - `BACKEND_URL`: Frontend target backend URL. Use `http://127.0.0.1:8000` locally and `http://backend:8000` inside Docker Compose.
+- `LANGSMITH_TRACING`: Set to `true` to enable optional LangSmith tracing.
+- `LANGSMITH_API_KEY`: LangSmith API key for trace upload.
+- `LANGSMITH_PROJECT`: LangSmith project name. Default: `WarrenBuffet-Ai`.
 
 Never commit `.env`.
+
+## LangSmith Observability
+
+WarrenBuffet.Ai supports optional LangSmith tracing for debugging and observability.
+
+Set these variables in your local `.env` or Docker `.env`:
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your_langsmith_key
+LANGSMITH_PROJECT=WarrenBuffet-Ai
+```
+
+When tracing is enabled, the backend records traces for:
+
+- chat requests
+- intent classification
+- conversation agent
+- financial research graph
+- market data fetch
+- price history fetch
+- news retrieval/filtering
+- RAG retrieval
+- synthesis
+- voice transcription/chat
+
+Tracing is optional. If LangSmith variables are missing or `LANGSMITH_TRACING=false`, the app runs normally without trace upload.
+
+Do not commit real LangSmith API keys.
 
 ## Example Queries
 

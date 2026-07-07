@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.config import OPENAI_MODEL, validate_settings
+from app.core.observability import logger, traceable_if_enabled
 
 
 VALID_INTENTS = {
@@ -15,6 +16,15 @@ VALID_INTENTS = {
     "document_query",
     "voice_meta",
 }
+
+
+def _process_intent_trace_inputs(inputs: dict) -> dict:
+    document_ids = inputs.get("document_ids") or []
+    return {
+        "query": inputs.get("query"),
+        "ticker_present": bool(inputs.get("ticker")),
+        "document_ids_count": len(document_ids),
+    }
 
 
 def _normalized(query: str) -> str:
@@ -172,9 +182,27 @@ def classify_intent(
     ticker: str | None = None,
     document_ids: list[str] | None = None,
 ) -> str:
+    return _classify_intent_traced(query, ticker, document_ids)
+
+
+@traceable_if_enabled(
+    name="Intent Classification",
+    process_inputs=_process_intent_trace_inputs,
+)
+def _classify_intent_traced(
+    query: str,
+    ticker: str | None = None,
+    document_ids: list[str] | None = None,
+) -> str:
     deterministic = _deterministic_intent(query, ticker, document_ids)
 
     if deterministic:
+        logger.info(
+            "intent_selected intent=%s source=deterministic ticker_present=%s document_ids_count=%s",
+            deterministic,
+            bool(ticker),
+            len(document_ids or []),
+        )
         return deterministic
 
     try:
@@ -205,8 +233,19 @@ def classify_intent(
         label = re.sub(r"[^a-z_].*$", "", label)
 
         if label in VALID_INTENTS:
+            logger.info(
+                "intent_selected intent=%s source=llm ticker_present=%s document_ids_count=%s",
+                label,
+                bool(ticker),
+                len(document_ids or []),
+            )
             return label
     except Exception:
         pass
 
+    logger.info(
+        "intent_selected intent=clarification_or_planning source=fallback ticker_present=%s document_ids_count=%s",
+        bool(ticker),
+        len(document_ids or []),
+    )
     return "clarification_or_planning"
