@@ -1,0 +1,14 @@
+.venv
+__pycache__
+*.pyc
+.env
+.env.local
+.pytest_cache
+.DS_Store
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.webm
+temp
+uploads
